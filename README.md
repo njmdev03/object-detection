@@ -1,5 +1,13 @@
 # Object Detection
 
+## Setup
+
+Install torch and torch vision with cuda, then
+
+```bash
+pip install -r requirements.txt
+```
+
 ## Run
 
 Fast R-CNN
