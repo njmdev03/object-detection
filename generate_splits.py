@@ -103,8 +103,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default="data")
     parser.add_argument("--pet_breeds", type=int, default=5)
+    parser.add_argument("--dl-only", action="store_true", default=False)
     args = parser.parse_args()
 
+    OxfordIIITPet(root=args.root, download=True)
     download_penn_fudan(args.root)
-    generate_penn_splits(args.root)
-    generate_pet_splits(args.root, args.pet_breeds)
+
+    if not args.dl_only:
+        generate_penn_splits(args.root)
+        generate_pet_splits(args.root, args.pet_breeds)
