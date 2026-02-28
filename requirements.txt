@@ -5,3 +5,6 @@ torch
 torchvision
 torchmetrics
 faster-coco-eval
+ultralytics
+pandas
+seaborn

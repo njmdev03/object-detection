@@ -1,2 +1,5 @@
 **/data
 **/checkpoints
+**/runs
+**.pt
+**/__pycache__

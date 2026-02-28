@@ -84,6 +84,8 @@ def generate_pet_splits(root, num_breeds=5):
 
     splits = create_split_dict(images)
 
+    selected_breeds = [x.lower().replace(" ", "_") for x in selected_breeds]
+
     # Stable label mapping (start from 1 for detection models)
     breed_to_label = {breed: i + 1 for i, breed in enumerate(selected_breeds)}
 

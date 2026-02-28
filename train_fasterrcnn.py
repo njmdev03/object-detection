@@ -12,44 +12,11 @@ from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from PIL import Image
 from tqdm import tqdm
 
+from datasets import get_dataset
+from transforms import get_detection_transforms
+
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-# ---------------- Dataset ----------------
-class PennDataset(Dataset):
-    def __init__(self, root, split_json, split):
-        self.root = Path(root) / "PennFudanPed"
-        with open(split_json) as f:
-            splits = json.load(f)
-        self.images = splits[split]
-
-    def __len__(self):
-        return len(self.images)
-
-    def __getitem__(self, idx):
-        img_name = self.images[idx]
-        img_path = self.root / "PNGImages" / img_name
-        mask_path = self.root / "PedMasks" / img_name.replace(".png", "_mask.png")
-
-        img = Image.open(img_path).convert("RGB")
-        mask = Image.open(mask_path)
-
-        mask = np.array(mask)
-        obj_ids = np.unique(mask)[1:]
-
-        boxes = []
-        for obj_id in obj_ids:
-            pos = np.where(mask == obj_id)
-            xmin, xmax = np.min(pos[1]), np.max(pos[1])
-            ymin, ymax = np.min(pos[0]), np.max(pos[0])
-            boxes.append([xmin, ymin, xmax, ymax])
-
-        boxes = torch.as_tensor(boxes, dtype=torch.float32)
-        labels = torch.ones((len(boxes),), dtype=torch.int64)
-
-        target = {"boxes": boxes, "labels": labels}
-        return F.to_tensor(img), target
 
 
 def collate_fn(batch):
@@ -111,11 +78,12 @@ def evaluate(model, loader):
 
 # ---------------- Training ----------------
 def train(args):
-    train_ds = PennDataset(args.root, args.splits, "train")
-    val_ds = PennDataset(args.root, args.splits, "val")
+    DatasetClass = get_dataset(args.dataset)
+    train_dataset = DatasetClass(root="data", split_json=args.splits, transform=get_detection_transforms(train=True))
+    val_dataset   = DatasetClass(root="data", split_json=args.splits, transform=get_detection_transforms(train=False))
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch, shuffle=True, collate_fn=collate_fn)
-    val_loader = DataLoader(val_ds, batch_size=1, collate_fn=collate_fn)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch, shuffle=True, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=1, collate_fn=collate_fn)
 
     model = fasterrcnn_mobilenet_v3_large_fpn(weights="DEFAULT")
     model.to(DEVICE)
@@ -161,6 +129,8 @@ def train(args):
         # Validation
         results, fps = evaluate(model, val_loader)
 
+        epoch_time = time.time() - epoch_start_time
+
         map50 = results["map_50"].item()
         map5095 = results["map"].item()
         recall = results["mar_100"].item()
@@ -169,6 +139,7 @@ def train(args):
         print(f"mAP@0.5:0.95: {map5095:.4f}")
         print(f"Recall: {recall:.4f}")
         print(f"Inference Speed: {fps:.2f} img/sec")
+        print(f"Epoch Validation Time: {epoch_time:.2f} sec")
 
         # Save epoch checkpoint
         save_checkpoint(
@@ -186,7 +157,8 @@ def train(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default="data")
-    parser.add_argument("--splits", default="pennfudan_splits.json")
+    parser.add_argument("--dataset", type=str, default="penn", help="Dataset to train on: penn or pet")
+    parser.add_argument("--splits", type=str, default="pennfudan_splits.json")
     parser.add_argument("--checkpoints", default="checkpoints/PennFudanPed")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch", type=int, default=2)

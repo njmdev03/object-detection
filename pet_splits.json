@@ -502,17 +502,17 @@
         "japanese_chin_186.jpg"
     ],
     "breeds": [
-        "American Bulldog",
-        "Bombay",
-        "German Shorthaired",
-        "Great Pyrenees",
-        "Japanese Chin"
+        "american_bulldog",
+        "bombay",
+        "german_shorthaired",
+        "great_pyrenees",
+        "japanese_chin"
     ],
     "breed_to_label": {
-        "American Bulldog": 1,
-        "Bombay": 2,
-        "German Shorthaired": 3,
-        "Great Pyrenees": 4,
-        "Japanese Chin": 5
+        "american_bulldog": 1,
+        "bombay": 2,
+        "german_shorthaired": 3,
+        "great_pyrenees": 4,
+        "japanese_chin": 5
     }
 }
