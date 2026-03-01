@@ -1,8 +1,10 @@
+import time
 import argparse
 import torch
 from pathlib import Path
 from torch.utils.data import DataLoader
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
+from torchvision.models.detection import fasterrcnn_mobilenet_v3_large_fpn
 from tqdm import tqdm
 import yaml
 
@@ -37,6 +39,7 @@ def save_checkpoint(model, optimizer, epoch, path):
     torch.save(checkpoint, path)
     print(f"Checkpoint saved: {path}")
 
+# ------- YOLO Helpers --------
 def convert_targets_to_yolo(targets, imgs):
     """
     Convert torchvision-style targets to YOLO format.
@@ -95,16 +98,16 @@ def load_yolov5(num_classes):
     with torch.serialization.safe_globals([Model]):
         ckpt = torch.load(weights, map_location=device, weights_only=False)
 
-    # 1️⃣ Extract pretrained state dict
+    # Extract pretrained state dict
     pretrained_dict = ckpt["model"].state_dict()
 
-    # 2️⃣ Remove Detect head keys (last layer) from checkpoint
+    # Remove Detect head keys (last layer) from checkpoint
     filtered_dict = {k: v for k, v in pretrained_dict.items() if not k.startswith("model.24")}
 
-    # 3️⃣ Load pretrained weights except Detect head
+    # Load pretrained weights except Detect head
     model.load_state_dict(filtered_dict, strict=False)
 
-    # 4️⃣ Freeze backbone
+    # Freeze backbone
     for param in model.parameters():
         param.requires_grad = False
     for param in model.model[-1].parameters():  # Detect head
@@ -127,7 +130,8 @@ def freeze_backbone(model):
         if "model.24" not in name:  # last layer in yolov5n
             param.requires_grad = False
 
-def train_yolo(args):
+# -------- Actual Running ----------
+def train(args):
     DatasetClass = get_dataset(args.dataset)
 
     train_dataset = DatasetClass(
@@ -155,21 +159,33 @@ def train_yolo(args):
         collate_fn=collate_fn
     )
 
-    num_classes = len(train_dataset.class_to_label) \
-        if hasattr(train_dataset, "class_to_label") \
-        else len(train_dataset.breed_to_label)
+    if args.model == "rcnn":
+        model = fasterrcnn_mobilenet_v3_large_fpn(weights="DEFAULT")
+    elif args.model == "yolo":
+        num_classes = len(train_dataset.class_to_label) \
+            if hasattr(train_dataset, "class_to_label") \
+            else len(train_dataset.breed_to_label)
 
-    model = load_yolov5(num_classes)
-    freeze_backbone(model)
+        model = load_yolov5(num_classes)
+        freeze_backbone(model)
 
-    compute_loss = ComputeLoss(model)
+        compute_loss = ComputeLoss(model)
+
+    model.to(DEVICE)
 
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = getattr(torch.optim, args.optimizer)(params, lr=args.lr)
 
-    model.to(DEVICE)
+    if args.resume:
+        checkpoint = torch.load(args.resume)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        print(f"Resumed from epoch {checkpoint['epoch']}")
+
+    total_start_time = time.time()
 
     for epoch in range(args.epochs):
+        epoch_start_time = time.time()
         model.train()
         epoch_loss = 0
 
@@ -177,18 +193,22 @@ def train_yolo(args):
             imgs = [img.to(DEVICE) for img in imgs]
             targets = [{k: v.to(DEVICE) for k, v in t.items()} for t in targets]
 
-            # --- FIX: Convert 1-based labels to 0-based for YOLO ---
-            if args.dataset == "pet":
-                for t in targets:
-                    t["labels"] = t["labels"] - 1  # YOLO expects 0-based class indices
+            if args.model.lower() == "yolo":
+                # --- YOLO specific preprocessing ---
+                # Convert 1-based labels to 0-based
+                if args.dataset in ["pet", "some_other_1_based_dataset"]:
+                    for t in targets:
+                        t["labels"] = t["labels"] - 1
 
-            imgs_tensor = torch.stack(imgs)
+                imgs_tensor = torch.stack(imgs)
+                yolo_targets = convert_targets_to_yolo(targets, imgs)
+                preds = model(imgs_tensor)
+                loss, loss_items = compute_loss(preds, yolo_targets)
 
-            yolo_targets = convert_targets_to_yolo(targets, imgs)
-
-            preds = model(imgs_tensor)
-
-            loss, loss_items = compute_loss(preds, yolo_targets)
+            elif args.model.lower() == "rcnn":
+                # --- R-CNN uses targets as-is ---
+                loss_dict = model(imgs, targets)
+                loss = sum(loss_dict.values())
 
             optimizer.zero_grad()
             loss.backward()
@@ -196,9 +216,17 @@ def train_yolo(args):
 
             epoch_loss += loss.item()
 
-        print(f"\nEpoch {epoch+1}")
-        print(f"Training Loss: {epoch_loss:.4f}")
+        epoch_time = time.time() - epoch_start_time
 
+        print(f"\nEpoch {epoch+1}/{args.epochs}")
+        print(f"Training Loss: {epoch_loss:.4f}")
+        print(f"Epoch Training Time: {epoch_time:.2f} sec")
+
+        # TODO: Validation
+        # Validation
+        
+
+        # Save epoch checkpoint
         checkpoint_dir = Path(args.checkpoints).resolve()
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -206,48 +234,13 @@ def train_yolo(args):
             model,
             optimizer,
             epoch,
-            checkpoint_dir / f"yolo_epoch_{epoch+1}.pth"
+            checkpoint_dir / f"epoch_{epoch+1}.pth"
         )
 
-def evaluate_yolo(model, loader):
-    model.eval()
+    total_training_time = time.time() - total_start_time
+    print("\n===== Training Complete =====")
+    print(f"Total Training Time: {total_training_time:.2f} sec")
 
-    metric = MeanAveragePrecision().to(DEVICE)
-
-    with torch.no_grad():
-        for imgs, targets in loader:
-            imgs = [img.to(DEVICE) for img in imgs]
-            imgs_tensor = torch.stack(imgs)
-
-            preds = model(imgs_tensor)
-            preds = non_max_suppression(preds)
-
-            # Convert to TorchMetrics format
-            formatted_preds = []
-            formatted_gts = []
-
-            for pred, target in zip(preds, targets):
-                if pred is None:
-                    formatted_preds.append({
-                        "boxes": torch.zeros((0,4)).to(DEVICE),
-                        "scores": torch.zeros(0).to(DEVICE),
-                        "labels": torch.zeros(0, dtype=torch.int64).to(DEVICE)
-                    })
-                else:
-                    formatted_preds.append({
-                        "boxes": pred[:, :4],
-                        "scores": pred[:, 4],
-                        "labels": pred[:, 5].long()
-                    })
-
-                formatted_gts.append({
-                    "boxes": target["boxes"].to(DEVICE),
-                    "labels": target["labels"].to(DEVICE)
-                })
-
-            metric.update(formatted_preds, formatted_gts)
-
-    return metric.compute()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -260,6 +253,7 @@ if __name__ == "__main__":
     parser.add_argument("--optimizer", default="Adam")
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--resume", default=None)
+    parser.add_argument("--model", type= str, default="rcnn", help="Model to train, rcnn or yolo")
     args = parser.parse_args()
 
-    train_yolo(args)
+    train(args)

@@ -1,15 +1,11 @@
-import json
 import time
 import argparse
 import torch
-import numpy as np
 from pathlib import Path
 from torchvision.transforms import functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from torchvision.models.detection import fasterrcnn_mobilenet_v3_large_fpn
-from torchvision.ops import box_iou
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
-from PIL import Image
 from tqdm import tqdm
 
 from datasets import get_dataset
