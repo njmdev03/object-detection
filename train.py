@@ -192,7 +192,7 @@ def evaluate(model, loader):
                     })
 
                 else:
-                    raise ValueError(f"Unknown model type: {model_type}")
+                    raise ValueError(f"Unknown model type: {args.model}")
 
             # Update metric
             metric.update(preds, gts)
