@@ -147,48 +147,57 @@ def evaluate(model, loader):
 
             outputs = model(imgs_tensor)
 
-            if args.model == "Yolo":
-                outputs = non_max_suppression(outputs)
-
             preds = []
             gts = []
 
+            if args.model.lower() == "yolo":
+                outputs = non_max_suppression(outputs)
+
             for pred, target in zip(outputs, targets):
-                if args.model == "yolo":
+                # --- YOLO ---
+                if args.model.lower() == "yolo":
                     if pred is None or pred.numel() == 0:
                         preds.append({
-                            "boxes": torch.zeros((0,4)).to(DEVICE),
-                            "scores": torch.zeros(0).to(DEVICE),
-                            "labels": torch.zeros(0, dtype=torch.int64).to(DEVICE)
+                            "boxes": torch.zeros((0,4), device=DEVICE),
+                            "scores": torch.zeros((0,), device=DEVICE),
+                            "labels": torch.zeros((0,), dtype=torch.int64, device=DEVICE)
                         })
                     else:
+                        # Ensure only xyxy columns, no batch index
+                        pred = pred.to(DEVICE)
+                        if pred.shape[1] > 6:  # sometimes extra columns exist
+                            pred = pred[:, :6]
                         preds.append({
-                            "boxes": pred[:, :4],
-                            "scores": pred[:, 4],
-                            "labels": pred[:, 5].long()
+                            "boxes": pred[:, 0:4],   # xyxy
+                            "scores": pred[:, 4],    # confidence
+                            "labels": pred[:, 5].long()  # class
                         })
-
-                    gts.append({
-                        "boxes": target["boxes"].to(DEVICE),
-                        "labels": target["labels"].to(DEVICE)
-                    })
-
-                elif args.model == "rcnn":
-                    preds.append({
-                        "boxes": pred["boxes"],
-                        "scores": pred["scores"],
-                        "labels": pred["labels"]
-                    })
 
                     gts.append({
                         "boxes": target["boxes"],
                         "labels": target["labels"]
                     })
 
+                # --- R-CNN ---
+                elif args.model.lower() == "rcnn":
+                    # Make sure all tensors are on DEVICE
+                    preds.append({
+                        "boxes": pred["boxes"].to(DEVICE),
+                        "scores": pred["scores"].to(DEVICE),
+                        "labels": pred["labels"].to(DEVICE)
+                    })
+                    gts.append({
+                        "boxes": target["boxes"],
+                        "labels": target["labels"]
+                    })
+
+                else:
+                    raise ValueError(f"Unknown model type: {model_type}")
+
+            # Update metric
             metric.update(preds, gts)
 
     results = metric.compute()
-
     elapsed = time.time() - start
     fps = len(loader.dataset) / elapsed
 
