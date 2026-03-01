@@ -8,6 +8,8 @@ Install torch and torch vision with cuda, then
 pip install -r requirements.txt
 ```
 
+then see **Run**
+
 ## Run
 
 Fast R-CNN
