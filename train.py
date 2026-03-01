@@ -130,6 +130,71 @@ def freeze_backbone(model):
         if "model.24" not in name:  # last layer in yolov5n
             param.requires_grad = False
 
+
+# ---------------- Evaluation ----------------
+def evaluate(model, loader):
+    model.eval()
+
+    metric = MeanAveragePrecision(iou_type="bbox", backend="faster_coco_eval").to(DEVICE)
+
+    start = time.time()
+
+    with torch.no_grad():
+        for imgs, targets in loader:
+            imgs = [img.to(DEVICE) for img in imgs]
+            targets = [{k: v.to(DEVICE) for k, v in t.items()} for t in targets]
+            imgs_tensor = torch.stack(imgs)
+
+            outputs = model(imgs_tensor)
+
+            if args.model == "Yolo":
+                outputs = non_max_suppression(outputs)
+
+            preds = []
+            gts = []
+
+            for pred, target in zip(outputs, targets):
+                if args.model == "yolo":
+                    if pred is None or pred.numel() == 0:
+                        preds.append({
+                            "boxes": torch.zeros((0,4)).to(DEVICE),
+                            "scores": torch.zeros(0).to(DEVICE),
+                            "labels": torch.zeros(0, dtype=torch.int64).to(DEVICE)
+                        })
+                    else:
+                        preds.append({
+                            "boxes": pred[:, :4],
+                            "scores": pred[:, 4],
+                            "labels": pred[:, 5].long()
+                        })
+
+                    gts.append({
+                        "boxes": target["boxes"].to(DEVICE),
+                        "labels": target["labels"].to(DEVICE)
+                    })
+
+                elif args.model == "rcnn":
+                    preds.append({
+                        "boxes": pred["boxes"],
+                        "scores": pred["scores"],
+                        "labels": pred["labels"]
+                    })
+
+                    gts.append({
+                        "boxes": target["boxes"],
+                        "labels": target["labels"]
+                    })
+
+            metric.update(preds, gts)
+
+    results = metric.compute()
+
+    elapsed = time.time() - start
+    fps = len(loader.dataset) / elapsed
+
+    return results, fps
+
+
 # -------- Actual Running ----------
 def train(args):
     DatasetClass = get_dataset(args.dataset)
@@ -224,7 +289,19 @@ def train(args):
 
         # TODO: Validation
         # Validation
-        
+        results, fps = evaluate(model, val_loader)
+
+        epoch_time = time.time() - epoch_start_time
+
+        map50 = results["map_50"].item()
+        map5095 = results["map"].item()
+        recall = results["mar_100"].item()
+
+        print(f"mAP@0.5: {map50:.4f}")
+        print(f"mAP@0.5:0.95: {map5095:.4f}")
+        print(f"Recall: {recall:.4f}")
+        print(f"Inference Speed: {fps:.2f} img/sec")
+        print(f"Epoch Validation Time: {epoch_time:.2f} sec")
 
         # Save epoch checkpoint
         checkpoint_dir = Path(args.checkpoints).resolve()
@@ -236,6 +313,8 @@ def train(args):
             epoch,
             checkpoint_dir / f"epoch_{epoch+1}.pth"
         )
+
+        print()
 
     total_training_time = time.time() - total_start_time
     print("\n===== Training Complete =====")
