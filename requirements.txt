@@ -8,3 +8,4 @@ faster-coco-eval
 ultralytics
 pandas
 seaborn
+pycocotools

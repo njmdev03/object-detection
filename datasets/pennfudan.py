@@ -32,14 +32,14 @@ def masks_to_boxes(mask: Image.Image) -> torch.Tensor:
 
 
 class PennFudanDataset(Dataset):
-    def __init__(self, root, split_json, transform=None):
+    def __init__(self, root, split_json, split="train", transform=None):
         self.root = Path(root) / "PennFudanPed"
         self.transform = transform
 
         with open(split_json) as f:
             splits = json.load(f)
 
-        self.images = splits["train"]  # or val/test depending on loader
+        self.images = splits[split]  # or val/test depending on loader
         self.class_to_label = splits["class_to_label"]
 
     def __len__(self):

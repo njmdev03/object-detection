@@ -7,6 +7,7 @@ from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from torchvision.models.detection import fasterrcnn_mobilenet_v3_large_fpn
 from tqdm import tqdm
 import yaml
+import csv
 
 import sys
 from pathlib import Path
@@ -121,10 +122,10 @@ def load_yolov5(num_classes):
     return model
 
 def freeze_backbone(model):
-    print("Model Params")
-    for name, _ in model.named_parameters():
-        print(name)
-    print()
+    # print("Model Params")
+    # for name, _ in model.named_parameters():
+    #     print(name)
+    # print()
 
     for name, param in model.named_parameters():
         if "model.24" not in name:  # last layer in yolov5n
@@ -140,18 +141,24 @@ def evaluate(model, loader):
     start = time.time()
 
     with torch.no_grad():
-        for imgs, targets in loader:
+        for imgs, targets in tqdm(loader):
             imgs = [img.to(DEVICE) for img in imgs]
             targets = [{k: v.to(DEVICE) for k, v in t.items()} for t in targets]
             imgs_tensor = torch.stack(imgs)
 
             outputs = model(imgs_tensor)
 
+            # print(type(outputs))
+            # print(len(outputs))
+
             preds = []
             gts = []
 
             if args.model.lower() == "yolo":
-                outputs = non_max_suppression(outputs)
+                outputs, _ = outputs
+                outputs = non_max_suppression(outputs,  conf_thres=0.001)
+
+                # print(f"outputs device {outputs[0].device}")
 
             for pred, target in zip(outputs, targets):
                 # --- YOLO ---
@@ -172,6 +179,9 @@ def evaluate(model, loader):
                             "scores": pred[:, 4],    # confidence
                             "labels": pred[:, 5].long()  # class
                         })
+
+                    if args.model.lower() == "yolo":
+                        target["labels"] = target["labels"] - 1
 
                     gts.append({
                         "boxes": target["boxes"],
@@ -194,6 +204,9 @@ def evaluate(model, loader):
                 else:
                     raise ValueError(f"Unknown model type: {args.model}")
 
+                # print("GT labels:", target["labels"][:5])
+                # print("Pred labels:", pred[:, 5][:5] if pred is not None else None)
+
             # Update metric
             metric.update(preds, gts)
 
@@ -206,17 +219,37 @@ def evaluate(model, loader):
 
 # -------- Actual Running ----------
 def train(args):
+
+    # Metric logging
+    metrics_file = Path(args.checkpoints) / "metrics.csv"
+    metrics_file.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(metrics_file, mode="w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "epoch",
+            "train_loss",
+            "mAP@0.5",
+            "mAP@0.5:0.95",
+            "precision",
+            "recall",
+            "train_time_sec",
+            "inference_fps"
+        ])
+
     DatasetClass = get_dataset(args.dataset)
 
     train_dataset = DatasetClass(
         root=args.root,
         split_json=args.splits,
+        split="train",
         transform=get_detection_transforms(train=True)
     )
 
     val_dataset = DatasetClass(
         root=args.root,
         split_json=args.splits,
+        split="val",
         transform=get_detection_transforms(train=False)
     )
 
@@ -229,7 +262,7 @@ def train(args):
 
     val_loader = DataLoader(
         val_dataset,
-        batch_size=1,
+        batch_size=args.batch,
         collate_fn=collate_fn
     )
 
@@ -241,7 +274,7 @@ def train(args):
             else len(train_dataset.breed_to_label)
 
         model = load_yolov5(num_classes)
-        freeze_backbone(model)
+        # freeze_backbone(model)
 
         compute_loss = ComputeLoss(model)
 
@@ -270,9 +303,8 @@ def train(args):
             if args.model.lower() == "yolo":
                 # --- YOLO specific preprocessing ---
                 # Convert 1-based labels to 0-based
-                if args.dataset in ["pet", "some_other_1_based_dataset"]:
-                    for t in targets:
-                        t["labels"] = t["labels"] - 1
+                for t in targets:
+                    t["labels"] = t["labels"] - 1
 
                 imgs_tensor = torch.stack(imgs)
                 yolo_targets = convert_targets_to_yolo(targets, imgs)
@@ -312,6 +344,22 @@ def train(args):
         print(f"Inference Speed: {fps:.2f} img/sec")
         print(f"Epoch Validation Time: {epoch_time:.2f} sec")
 
+        precision = results["map_50"].item()
+        recall = results["mar_100"].item()
+
+        with open(metrics_file, mode="a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                epoch + 1,
+                epoch_loss,
+                map50,
+                map5095,
+                precision,
+                recall,
+                epoch_time,
+                fps
+            ])
+
         # Save epoch checkpoint
         checkpoint_dir = Path(args.checkpoints).resolve()
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -337,7 +385,7 @@ if __name__ == "__main__":
     parser.add_argument("--splits", type=str, default="pennfudan_splits.json")
     parser.add_argument("--checkpoints", default="checkpoints/PennFudanPed")
     parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--batch", type=int, default=2)
+    parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--optimizer", default="Adam")
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--resume", default=None)
