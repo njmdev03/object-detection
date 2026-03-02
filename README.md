@@ -35,9 +35,9 @@ python train.py --model rcnn --dataset pet --splits pet_splits.json --checkpoint
 YOLO
 
 ``` bash
-python train.py --model yolo --dataset penn --splits pennfudan_splits.json --checkpoints checkpoints/yolo/PennFudanPed --epochs 300
+python train.py --model yolo --dataset penn --splits pennfudan_splits.json --checkpoints checkpoints/yolo/PennFudanPed --epochs 300 --lr 0.0005 --batch 8
 
-python train.py --model yolo --dataset pet --splits pet_splits.json --checkpoints checkpoints/yolo/oxford-iiit-pet --epochs 300 --lr 0.0005 --batch-size 8
+python train.py --model yolo --dataset pet --splits pet_splits.json --checkpoints checkpoints/yolo/oxford-iiit-pet --epochs 300 --lr 0.0005 --batch 8
 ```
 
 ## Vis

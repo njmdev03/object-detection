@@ -1,5 +1,6 @@
 from torchvision import transforms as T
 import torchvision.transforms.functional as F
+from  torchvision.transforms import ColorJitter
 import random
 
 class ComposeDetection:
@@ -51,9 +52,24 @@ class RandomHorizontalFlip:
             target["boxes"] = boxes
         return image, target
 
+class ColorJitterDetection:
+    """Wrap torchvision ColorJitter to support (image, target) tuples."""
+    def __init__(self, brightness=0, contrast=0, saturation=0, hue=0):
+        self.jitter = T.ColorJitter(brightness=brightness,
+                                    contrast=contrast,
+                                    saturation=saturation,
+                                    hue=hue)
+
+    def __call__(self, image, target):
+        image = self.jitter(image)
+        return image, target
+
 def get_detection_transforms(train=True):
     transforms = [Resize((512,512))]
-    # if train:
-    #     transforms.append(RandomHorizontalFlip(0.5))
+
+    if train:
+        transforms.append(RandomHorizontalFlip(0.5))
+        transforms.append(ColorJitterDetection(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05))
+
     transforms.append(ToTensor())
     return ComposeDetection(transforms)

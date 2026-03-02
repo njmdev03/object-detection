@@ -328,11 +328,11 @@ def train(args):
         print(f"Training Loss: {epoch_loss:.4f}")
         print(f"Epoch Training Time: {epoch_time:.2f} sec")
 
-        # TODO: Validation
+        epoch_start_time = time.time()
         # Validation
         results, fps = evaluate(model, val_loader)
 
-        epoch_time = time.time() - epoch_start_time
+        epoch_val_time = time.time() - epoch_start_time
 
         map50 = results["map_50"].item()
         map5095 = results["map"].item()
@@ -342,7 +342,7 @@ def train(args):
         print(f"mAP@0.5:0.95: {map5095:.4f}")
         print(f"Recall: {recall:.4f}")
         print(f"Inference Speed: {fps:.2f} img/sec")
-        print(f"Epoch Validation Time: {epoch_time:.2f} sec")
+        print(f"Epoch Validation Time: {epoch_val_time:.2f} sec")
 
         precision = results["map_50"].item()
         recall = results["mar_100"].item()
