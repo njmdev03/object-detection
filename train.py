@@ -243,7 +243,7 @@ def train(args):
         root=args.root,
         split_json=args.splits,
         split="train",
-        transform=get_detection_transforms(train=True)
+        transform=get_detection_transforms(train=(True if args.augmentation else False))
     )
 
     val_dataset = DatasetClass(
@@ -390,6 +390,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--resume", default=None)
     parser.add_argument("--model", type= str, default="rcnn", help="Model to train, rcnn or yolo")
+    parser.add_argument("--augment", action="store_true")
     args = parser.parse_args()
 
     train(args)
