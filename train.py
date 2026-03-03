@@ -26,6 +26,7 @@ from transforms import get_detection_transforms
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
 def collate_fn(batch):
     return tuple(zip(*batch))
 
@@ -243,7 +244,7 @@ def train(args):
         root=args.root,
         split_json=args.splits,
         split="train",
-        transform=get_detection_transforms(train=(True if args.augmentation else False))
+        transform=get_detection_transforms(train=(True if args.augment else False))
     )
 
     val_dataset = DatasetClass(
@@ -274,7 +275,7 @@ def train(args):
             else len(train_dataset.breed_to_label)
 
         model = load_yolov5(num_classes)
-        # freeze_backbone(model)
+        freeze_backbone(model)
 
         compute_loss = ComputeLoss(model)
 
@@ -390,7 +391,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--resume", default=None)
     parser.add_argument("--model", type= str, default="rcnn", help="Model to train, rcnn or yolo")
-    parser.add_argument("--augment", action="store_true")
+    parser.add_argument("--augment", action="store_true", default=False)
     args = parser.parse_args()
 
     train(args)
